@@ -7,6 +7,7 @@
   #:use-module (thrussh configuration)
   #:use-module (thrussh paths)
   #:use-module (ice-9 sandbox)
+  #:use-module (srfi srfi-26)
   #:export (cons-resources
             eval-configuration-in-sandbox
             run))
@@ -64,3 +65,21 @@ from this module."
     '((thrussh classes)
       %git-resource-class)
     all-pure-bindings)))
+
+;; TODO: This should properly handle escaped spaces and quotes like a shell
+(define (parse-command cmd)
+  "Split CMD into space-separated words that may be quoted with either single or
+double quotes."
+  (define (strip-matching char word)
+    (and
+     (string-prefix? char word)
+     (string-suffix? char word)
+     (substring word 1 (- (string-length word) 1))))
+  (define strip-' (cut strip-matching "'" <>))
+  (define strip-'' (cut strip-matching "\"" <>))
+  (map
+   (lambda (word)
+     (or (strip-' word)
+         (strip-'' word)
+         word))
+   (string-split cmd #\space)))
