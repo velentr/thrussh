@@ -28,7 +28,14 @@
             resource->name
             resource->path
             resource->type
-            resource?))
+            resource?
+            ssh-key*
+            ssh-key->authorized-keys-entry
+            ssh-key->comment
+            ssh-key->id
+            ssh-key->key
+            ssh-key->key-type
+            ssh-key?))
 
 ;;; Commentary:
 ;;;
@@ -56,21 +63,74 @@ matches ssh commands with HANDLER."
     (error "resource class name must be a string:" name))
   (make-resource-class name constructor handler))
 
+;; Specification for an SSH public key.
+(define-immutable-record-type <ssh-key>
+  (make-ssh-key key-type key comment)
+  ssh-key?
+  (key-type ssh-key->key-type)
+  (key ssh-key->key)
+  (comment ssh-key->comment))
+
+(define %supported-ssh-key-types
+  '(sk-ecdsa-sha2-nistp256@openssh.com
+    ecdsa-sha2-nistp256
+    ecdsa-sha2-nistp384
+    ecdsa-sha2-nistp521
+    sk-ssh-ed25519@openssh.com
+    ssh-ed25519
+    ssh-rsa))
+
+(define* (ssh-key* #:key key-type key (comment ""))
+  (unless (string? key)
+    (error "key must be a base64-encoded public key"))
+  (unless (member key-type %supported-ssh-key-types)
+    (error "unrecognized key type:" key-type))
+  (unless (string? comment)
+    (error "comment must be a string"))
+  (make-ssh-key key-type key comment))
+
+(define (ssh-key->authorized-keys-entry key)
+  "Serialize KEY into an entry suitable for ~/.ssh/authorized_keys."
+  (string-join (list (symbol->string (ssh-key->key-type key))
+                     (ssh-key->key key)
+                     (ssh-key->comment key))))
+
+(define (ssh-key->id key)
+  "Get a shortened ID that maps 1-1 to KEY."
+  (let ((digest (sha256 (string->utf8 (ssh-key->key key)))))
+    (base64-encode
+     digest
+     0 (bytevector-length digest)
+     #f #f
+     base64url-alphabet)))
+
 ;; Reference to a directory stored on-disk that can be bound inside the
 ;; thrush container.
 (define-immutable-record-type <resource>
-  (make-resource name class)
+  (make-resource name class rw ro)
   resource?
   (name resource->name)
-  (class resource->class))
+  (class resource->class)
+  (rw resource->rw)
+  (ro resource->ro))
 
-(define* (resource* #:key name type)
-  "Create a reference to the resource with the given NAME of the given TYPE."
+(define* (resource* #:key name type (rw '()) (ro '()))
+  "Create a reference to the resource with the given NAME of the given TYPE. The
+keys specified in RW have read/write access; the keys specified in RO have
+read-only access."
+  (define (all pred? lst)
+    (or (nil? lst)
+        (and (pred? (car lst))
+             (all pred? (cdr lst)))))
   (unless (string? name)
     (error "resource name must be a string:" name))
   (unless (resource-class? type)
     (error "type must be a resource class:" type))
-  (make-resource name type))
+  (unless (and (list? rw) (all ssh-key? rw))
+    (error "read/write list must contain only SSH keys"))
+  (unless (and (list? ro) (all ssh-key? ro))
+    (error "read-only list must contain only SSH keys"))
+  (make-resource name type rw ro))
 
 (define (resource->type resource)
   "Get the type of RESOURCE, as a string."

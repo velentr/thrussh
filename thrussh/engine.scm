@@ -61,7 +61,8 @@ from this module."
    #:bindings
    (cons*
     '((thrussh configuration)
-      resource*)
+      resource*
+      ssh-key*)
     '((thrussh classes)
       %git-resource-class)
     all-pure-bindings)))
